@@ -33,6 +33,19 @@
             "args": ["small/raw_videos", "small/1min_clips"]
         },
         {
+            "name": "Debug: videos_split.py (small dataset)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/videos_split.py",
+            "args": [
+                "--input_dir",
+                "small/raw_videos",
+                "--output_dir",
+                "small/1min_clips"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Debug: videos_crop.py (small dataset)",
             "type": "debugpy",
             "request": "launch",
