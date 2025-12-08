@@ -63,6 +63,33 @@
                 "256"
             ],
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Debug: videos_process_train.py (train dataset)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/videos_process_train.py",
+            "args": [
+                "--video_ids_file",
+                "data_list/train_video_ids.txt",
+                "--tubes_file",
+                "data_list/train_video_tubes.txt",
+                "--output_dir",
+                "train/cropped_clips",
+                "--temp_raw_dir",
+                "train/temp_raw_videos",
+                "--temp_split_dir",
+                "train/temp_1min_clips",
+                "--delete_temp",
+                "on",
+                "--min_crop_width",
+                "512",
+                "--min_crop_height",
+                "512",
+                "--num_workers",
+                "32"
+            ],
+            "console": "integratedTerminal"
         }
     ]
 }
