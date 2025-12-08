@@ -25,7 +25,6 @@ parser.add_argument('--min_crop_width', type=int, default=256,
                     help='Minimum crop width in pixels. Only videos with crop width >= this value will be processed.')
 parser.add_argument('--min_crop_height', type=int, default=256,
                     help='Minimum crop height in pixels. Only videos with crop height >= this value will be processed.')
-args = parser.parse_args()
 
 
 def get_h_w(filepath):
@@ -341,6 +340,11 @@ def trim_and_crop_min_size(input_dir, output_dir, clip_params, min_crop_width=25
 
 
 if __name__ == '__main__':
+    # 명령줄 인자를 파싱한다
+    # parser.parse_args()는 명령줄에서 전달된 인자를 파싱하여 args 객체를 반환한다
+    # 이 코드는 스크립트가 직접 실행될 때만 실행되고, 다른 모듈에서 import할 때는 실행되지 않는다
+    args = parser.parse_args()
+    
     # Read list of videos.
     # clip_info는 비디오 클립 정보를 저장할 리스트이다
     # 빈 리스트로 초기화한다
