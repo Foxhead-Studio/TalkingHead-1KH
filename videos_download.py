@@ -19,7 +19,7 @@ args = parser.parse_args()  # 인자를 파싱해서 args에 저장
 
 def download_video(output_dir, video_id):  # 비디오를 다운로드하는 함수 정의
     r"""Download video."""  # 함수의 docstring
-    video_path = '%s/%s.mp4' % (output_dir, video_id)  # 저장될 비디오 파일 경로 생성
+    video_path = '%s/%s.mp4' % (output_dir, video_id)  # 저장될 비디오 파일 경로 생성 'small/raw_videos/--Y9imYnfBw.mp4'
     if not os.path.isfile(video_path):  # 파일이 이미 존재하지 않을 경우
         try:
             # Download the highest quality mp4 stream.  # (설명) 가장 높은 화질의 mp4 스트림 다운로드
@@ -41,7 +41,7 @@ if __name__ == '__main__':  # 메인 실행부
     with open(args.input_list) as fin:  # input_list 파일 열기
         for line in fin:  # 한 줄씩 읽기
             video_ids.append(line.strip())  # 줄 끝의 공백 제거 후 리스트에 추가
-
+    # video_ids = ['--Y9imYnfBw', '-7TMJtnhiPM']
     # Create output folder.  # (설명) 출력 폴더 생성
     os.makedirs(args.output_dir, exist_ok=True)  # 출력 폴더가 없으면 생성
 
