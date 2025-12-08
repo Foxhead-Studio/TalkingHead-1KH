@@ -21,6 +21,10 @@ parser.add_argument('--output_dir', type=str, required=True,
                     help='Location to dump outputs.')
 parser.add_argument('--num_workers', type=int, default=8,
                     help='How many multiprocessing workers?')
+parser.add_argument('--min_crop_width', type=int, default=256,
+                    help='Minimum crop width in pixels. Only videos with crop width >= this value will be processed.')
+parser.add_argument('--min_crop_height', type=int, default=256,
+                    help='Minimum crop height in pixels. Only videos with crop height >= this value will be processed.')
 args = parser.parse_args()
 
 
@@ -164,12 +168,14 @@ def trim_and_crop(input_dir, output_dir, clip_params):
     ffmpeg.run(stream)
 
 
-def trim_and_crop_min_size(input_dir, output_dir, clip_params):
-    # trim_and_crop_min_size: 프레임 크기가 512x512 이상인 경우만 처리하는 함수
+def trim_and_crop_min_size(input_dir, output_dir, clip_params, min_crop_width=256, min_crop_height=256):
+    # trim_and_crop_min_size: 프레임 크기가 min_crop_width x min_crop_height 이상인 경우만 처리하는 함수
     # 입력 인자는 trim_and_crop과 동일하다
     # input_dir: 입력 비디오가 있는 디렉토리 경로
     # output_dir: 출력 비디오를 저장할 디렉토리 경로
     # clip_params: 비디오 클립 정보가 담긴 문자열 (콤마로 구분)
+    # min_crop_width: 최소 crop 너비(픽셀), 이 값 이상인 경우만 처리한다
+    # min_crop_height: 최소 crop 높이(픽셀), 이 값 이상인 경우만 처리한다
     
     # 예시 clip_params: '--Y9imYnfBw_0000, 720, 1280, 0, 271, 504, 63, 792, 351'
     # 각 항목의 의미는 trim_and_crop 함수와 동일하다
@@ -260,13 +266,13 @@ def trim_and_crop_min_size(input_dir, output_dir, clip_params):
     # 예) b=351, t=63이면 b-t=288 (세로 288픽셀)
     crop_height = b - t
 
-    # crop된 영역의 크기가 512x512 이상인지 확인한다
-    # crop_width >= 512는 가로 너비가 512픽셀 이상인지 확인한다
-    # crop_height >= 512는 세로 높이가 512픽셀 이상인지 확인한다
+    # crop된 영역의 크기가 min_crop_width x min_crop_height 이상인지 확인한다
+    # crop_width >= min_crop_width는 가로 너비가 min_crop_width픽셀 이상인지 확인한다
+    # crop_height >= min_crop_height는 세로 높이가 min_crop_height픽셀 이상인지 확인한다
     # 두 조건을 모두 만족해야만 처리한다 (and 연산자 사용)
-    # 예) crop_width=288, crop_height=288이면 288 >= 512는 False이므로 건너뛴다
-    #     crop_width=600, crop_height=600이면 600 >= 512는 True이므로 처리한다
-    if crop_width >= 12 and crop_height >= 12:
+    # 예) crop_width=288, crop_height=288, min_crop_width=512, min_crop_height=512이면 288 >= 512는 False이므로 건너뛴다
+    #     crop_width=600, crop_height=600, min_crop_width=512, min_crop_height=512이면 600 >= 512는 True이므로 처리한다
+    if crop_width >= min_crop_width and crop_height >= min_crop_height:
         # ffmpeg 입력 스트림 생성
         # ffmpeg.input()은 비디오 파일을 입력 스트림으로 로드한다
         # input_filepath에 지정된 비디오 파일을 읽어온다
@@ -325,11 +331,11 @@ def trim_and_crop_min_size(input_dir, output_dir, clip_params):
         # 비디오가 성공적으로 생성되면 output_filepath에 파일이 저장된다
         ffmpeg.run(stream)
     else:
-        # crop된 영역의 크기가 512x512 미만인 경우 건너뛴다
+        # crop된 영역의 크기가 min_crop_width x min_crop_height 미만인 경우 건너뛴다
         # print()를 사용하여 건너뛴다는 메시지를 출력한다
         # %s는 문자열 포맷팅으로, video_name 값이 삽입된다
         # crop_width와 crop_height 값도 함께 출력하여 디버깅에 도움이 되도록 한다
-        print('Skipping %s: crop size (%dx%d) is smaller than 512x512' % (video_name, crop_width, crop_height))
+        print('Skipping %s: crop size (%dx%d) is smaller than %dx%d' % (video_name, crop_width, crop_height, min_crop_width, min_crop_height))
         # 함수를 종료하고 다음 클립으로 넘어간다
         return
 
@@ -365,12 +371,12 @@ if __name__ == '__main__':
     # Download videos.
     # trim_and_crop_min_size 함수를 사용하여 downloader를 생성한다
     # partial()은 함수의 일부 인자를 고정하여 새로운 함수를 만드는 함수이다
-    # trim_and_crop_min_size 함수의 첫 번째와 두 번째 인자(input_dir, output_dir)를 고정하고
+    # trim_and_crop_min_size 함수의 첫 번째, 두 번째, 네 번째, 다섯 번째 인자(input_dir, output_dir, min_crop_width, min_crop_height)를 고정하고
     # 세 번째 인자(clip_params)만 받는 새로운 함수를 만든다
     # 이렇게 하면 multiprocessing에서 각 클립 정보만 전달하면 된다
-    # trim_and_crop_min_size는 실제 비디오 파일 크기를 확인한 후 512x512 이상인 경우만 처리한다
+    # trim_and_crop_min_size는 실제 비디오 파일 크기를 확인한 후 min_crop_width x min_crop_height 이상인 경우만 처리한다
     # 실제 파일 크기가 다를 수 있으므로(리사이즈 등), 함수 내에서 실제 크기를 확인하는 것이 더 정확하다
-    downloader = partial(trim_and_crop_min_size, args.input_dir, args.output_dir)
+    downloader = partial(trim_and_crop_min_size, args.input_dir, args.output_dir, min_crop_width=args.min_crop_width, min_crop_height=args.min_crop_height)
 
     # 시작 시간을 기록한다
     # timer()는 현재 시간을 초 단위로 반환한다

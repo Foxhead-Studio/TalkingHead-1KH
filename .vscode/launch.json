@@ -56,7 +56,11 @@
                 "--output_dir",
                 "small/cropped_clips",
                 "--clip_info_file",
-                "data_list/small_video_tubes.txt"
+                "data_list/small_video_tubes.txt",
+                "--min_crop_width",
+                "256",
+                "--min_crop_height",
+                "256"
             ],
             "console": "integratedTerminal"
         }
