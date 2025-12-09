@@ -38,47 +38,372 @@ parser.add_argument('--num_workers', type=int, default=8,
 args = parser.parse_args()
 
 
+# def download_video(output_dir, video_id):
+#     # 비디오를 다운로드하는 함수
+#     # output_dir: 비디오를 저장할 디렉토리 경로
+#     # video_id: YouTube 비디오 ID (예: '--Y9imYnfBw')
+#     # 반환값: 다운로드된 비디오 파일 경로, 실패 시 None
+    
+#     # 저장될 비디오 파일 경로를 생성한다
+#     # 예) output_dir='train/temp_raw_videos', video_id='--Y9imYnfBw'이면
+#     #     'train/temp_raw_videos/--Y9imYnfBw.mp4'가 video_path가 된다
+#     video_path = os.path.join(output_dir, video_id + '.mp4')
+    
+#     # 파일이 이미 존재하면 다운로드하지 않고 경로만 반환한다
+#     # os.path.isfile()은 파일이 존재하는지 확인한다
+#     if os.path.isfile(video_path):
+#         print('File exists: %s' % (video_id))
+#         return video_path
+    
+#     # 파일이 없으면 다운로드를 시도한다
+#     try:
+#         # YouTube 객체를 생성한다
+#         # 'https://www.youtube.com/watch?v=%s' 형식의 URL을 사용한다
+#         # 예) video_id='--Y9imYnfBw'이면 'https://www.youtube.com/watch?v=--Y9imYnfBw'
+#         yt = YouTube('https://www.youtube.com/watch?v=%s' % (video_id))
+        
+#         # 해상도를 숫자로 변환하는 함수
+#         # resolution은 "720p", "1080p", "1440p" 같은 문자열 형식이다
+#         def parse_resolution(resolution_str):
+#             # resolution_str이 None이거나 빈 문자열이면 0을 반환한다
+#             if not resolution_str:
+#                 return 0
+#             # "p"를 제거하고 숫자만 추출한다
+#             # 예) "720p" → "720" → 720
+#             #     "1080p" → "1080" → 1080
+#             try:
+#                 # rstrip('p')는 오른쪽 끝의 'p'를 제거한다
+#                 # int()로 정수로 변환한다
+#                 return int(resolution_str.rstrip('p'))
+#             except:
+#                 # 변환 실패 시 0을 반환한다
+#                 return 0
+        
+#         # 먼저 progressive 스트림(비디오+오디오 포함) 중 720p 이상을 찾는다
+#         # filter()는 조건에 맞는 스트림만 필터링한다
+#         # subtype='mp4'는 mp4 형식의 스트림만 선택한다
+#         # progressive=True는 비디오와 오디오가 함께 있는 스트림을 의미한다
+#         progressive_streams = yt.streams.filter(subtype='mp4', progressive=True)
+#         # 720p 이상의 progressive 스트림만 필터링한다
+#         # parse_resolution(s.resolution) >= 720은 해상도가 720 이상인 스트림만 선택한다
+#         high_res_progressive = [s for s in progressive_streams if parse_resolution(s.resolution) >= 720]
+        
+#         # 720p 이상의 progressive 스트림이 있으면 그 중 최고 해상도를 선택한다
+#         if high_res_progressive:
+#             # max() 함수는 iterable에서 최대값을 반환한다
+#             # key 파라미터는 비교에 사용할 함수를 지정한다
+#             # parse_resolution(s.resolution)은 각 스트림의 해상도를 숫자로 변환한다
+#             best_stream = max(high_res_progressive, key=lambda s: parse_resolution(s.resolution))
+#             resolution = best_stream.resolution if best_stream.resolution else "Unknown"
+#             print('Downloading %s with resolution: %s (progressive)' % (video_id, resolution))
+#             # 비디오를 다운로드한다
+#             best_stream.download(output_path=output_dir, filename=video_id + '.mp4')
+#             print('Downloaded: %s (resolution: %s)' % (video_id, resolution))
+#             return video_path
+        
+#         # progressive 스트림에 720p 이상이 없으면 adaptive 스트림을 사용한다
+#         # adaptive 스트림은 비디오와 오디오가 분리되어 있다
+#         # 비디오 스트림만 가져온다 (only_video=True)
+#         video_streams = yt.streams.filter(subtype='mp4', only_video=True, adaptive=True)
+#         # 720p 이상의 비디오 스트림만 필터링한다
+#         high_res_video = [s for s in video_streams if parse_resolution(s.resolution) >= 720]
+        
+#         if not high_res_video:
+#             # 720p 이상의 스트림이 없으면 모든 비디오 스트림 중 최고 해상도를 선택한다
+#             if video_streams:
+#                 high_res_video = video_streams
+        
+#         if high_res_video:
+#             # 최고 해상도 비디오 스트림을 선택한다
+#             best_video_stream = max(high_res_video, key=lambda s: parse_resolution(s.resolution))
+            
+#             # 오디오 스트림을 찾는다
+#             # only_audio=True는 오디오만 있는 스트림을 의미한다
+#             audio_streams = yt.streams.filter(only_audio=True, adaptive=True)
+#             # 가장 높은 비트레이트의 오디오 스트림을 선택한다
+#             # abr 속성은 오디오 비트레이트를 의미한다 (예: "128kbps")
+#             best_audio_stream = None
+#             if audio_streams:
+#                 # abr 속성이 있는 스트림 중에서 선택한다
+#                 audio_with_abr = [s for s in audio_streams if s.abr]
+#                 if audio_with_abr:
+#                     # abr을 숫자로 변환하여 비교한다
+#                     # 예) "128kbps" → 128
+#                     def parse_abr(abr_str):
+#                         if not abr_str:
+#                             return 0
+#                         try:
+#                             return int(abr_str.rstrip('kbps'))
+#                         except:
+#                             return 0
+#                     best_audio_stream = max(audio_with_abr, key=lambda s: parse_abr(s.abr))
+#                 else:
+#                     # abr 속성이 없으면 첫 번째 오디오 스트림을 선택한다
+#                     best_audio_stream = audio_streams[0]
+            
+#             if not best_audio_stream:
+#                 print('No audio stream available for %s, downloading video only' % (video_id))
+#                 # 오디오가 없으면 비디오만 다운로드한다
+#                 video_resolution = best_video_stream.resolution if best_video_stream.resolution else "Unknown"
+#                 print('Downloading %s with resolution: %s (video only)' % (video_id, video_resolution))
+#                 best_video_stream.download(output_path=output_dir, filename=video_id + '.mp4')
+#                 print('Downloaded: %s (resolution: %s, video only)' % (video_id, video_resolution))
+#                 return video_path
+            
+#             # 비디오와 오디오를 임시 파일로 다운로드한다
+#             video_resolution = best_video_stream.resolution if best_video_stream.resolution else "Unknown"
+#             print('Downloading %s with resolution: %s (adaptive: video + audio)' % (video_id, video_resolution))
+            
+#             # 임시 파일 경로를 생성한다
+#             temp_video_path = os.path.join(output_dir, video_id + '_video_temp.mp4')
+#             temp_audio_path = os.path.join(output_dir, video_id + '_audio_temp.mp4')
+            
+#             # 비디오와 오디오를 다운로드한다
+#             best_video_stream.download(output_path=output_dir, filename=video_id + '_video_temp.mp4')
+#             best_audio_stream.download(output_path=output_dir, filename=video_id + '_audio_temp.mp4')
+            
+#             # ffmpeg를 사용하여 비디오와 오디오를 합친다
+#             # subprocess.run()은 외부 명령어를 실행한다
+#             # -i: 입력 파일을 지정한다 (비디오와 오디오)
+#             # -c copy: 코덱을 재인코딩하지 않고 복사한다 (빠르고 품질 손실 없음)
+#             # -map 0:v:0: 첫 번째 입력의 비디오 스트림을 매핑한다
+#             # -map 1:a:0: 두 번째 입력의 오디오 스트림을 매핑한다
+#             # -y: 출력 파일이 이미 존재하면 덮어쓴다
+#             result = subprocess.run([
+#                 'ffmpeg',
+#                 '-i', temp_video_path,
+#                 '-i', temp_audio_path,
+#                 '-c', 'copy',
+#                 '-map', '0:v:0',
+#                 '-map', '1:a:0',
+#                 '-y',
+#                 video_path
+#             ], capture_output=True, text=True)
+            
+#             # 임시 파일을 삭제한다
+#             if os.path.exists(temp_video_path):
+#                 os.remove(temp_video_path)
+#             if os.path.exists(temp_audio_path):
+#                 os.remove(temp_audio_path)
+            
+#             if result.returncode == 0:
+#                 print('Downloaded: %s (resolution: %s)' % (video_id, video_resolution))
+#                 return video_path
+#             else:
+#                 print('Failed to merge video and audio for %s' % (video_id))
+#                 print(result.stderr)
+#                 return None
+        
+#         # 모든 방법이 실패하면 None을 반환한다
+#         print('No suitable stream (>=720p) available for %s' % (video_id))
+#         return None
+#     except Exception as e:
+#         # 다운로드 실패 시 에러 메시지를 출력하고 None을 반환한다
+#         print(e)
+#         print('Failed to download %s' % (video_id))
+#         return None
+
+# ====================================================================================================
+
+# import os
+# import subprocess
+# from pytube import YouTube
+
+# def download_video(output_dir, video_id):
+#     # 비디오를 다운로드하는 함수다.
+#     # input/output 인터페이스는 그대로 유지한다.
+#     # - input: output_dir, video_id
+#     # - output: 다운로드된 mp4 경로 (str) 또는 실패 시 None
+
+#     # 저장 파일 경로
+#     video_path = os.path.join(output_dir, video_id + '.mp4')
+
+#     os.makedirs(output_dir, exist_ok=True)
+
+#     # 이미 있으면 스킵
+#     if os.path.isfile(video_path):
+#         print('File exists: %s' % (video_id))
+#         return video_path
+
+#     # 해상도 파싱 함수 ("1080p" -> 1080)
+#     def parse_resolution(resolution_str):
+#         if not resolution_str:
+#             return 0
+#         try:
+#             return int(resolution_str.rstrip('p'))
+#         except:
+#             return 0
+
+#     # 오디오 비트레이트 파싱 함수 ("128kbps" -> 128)
+#     def parse_abr(abr_str):
+#         if not abr_str:
+#             return 0
+#         try:
+#             return int(abr_str.rstrip('kbps'))
+#         except:
+#             return 0
+
+#     try:
+#         yt = YouTube('https://www.youtube.com/watch?v=%s' % (video_id))
+
+#         # 1) progressive(mp4, 비디오+오디오 같이 있는 것) 중에서
+#         #    해상도가 가장 높은 스트림을 선택한다.
+#         progressive_streams = yt.streams.filter(subtype='mp4', progressive=True)
+#         best_progressive = None
+#         if progressive_streams:
+#             best_progressive = max(
+#                 progressive_streams,
+#                 key=lambda s: parse_resolution(s.resolution)
+#             )
+
+#         if best_progressive and parse_resolution(best_progressive.resolution) > 0:
+#             resolution = best_progressive.resolution or "Unknown"
+#             print('Downloading %s with resolution: %s (best progressive)' %
+#                   (video_id, resolution))
+#             best_progressive.download(output_path=output_dir,
+#                                       filename=video_id + '.mp4')
+#             print('Downloaded: %s (resolution: %s)' % (video_id, resolution))
+#             return video_path
+
+#         # 2) progressive에서 못 골랐으면 adaptive(비디오/오디오 분리)에서
+#         #    가장 높은 해상도 비디오 스트림을 고른다.
+#         video_streams = yt.streams.filter(subtype='mp4', only_video=True, adaptive=True)
+#         if not video_streams:
+#             print('No video streams available for %s' % (video_id))
+#             return None
+
+#         best_video_stream = max(
+#             video_streams,
+#             key=lambda s: parse_resolution(s.resolution)
+#         )
+#         video_resolution = best_video_stream.resolution or "Unknown"
+
+#         # 오디오 스트림 중 가장 높은 비트레이트 선택
+#         audio_streams = yt.streams.filter(only_audio=True, adaptive=True)
+#         best_audio_stream = None
+#         if audio_streams:
+#             audio_with_abr = [s for s in audio_streams if s.abr]
+#             if audio_with_abr:
+#                 best_audio_stream = max(
+#                     audio_with_abr,
+#                     key=lambda s: parse_abr(s.abr)
+#                 )
+#             else:
+#                 best_audio_stream = audio_streams[0]
+
+#         # 임시 파일 경로
+#         temp_video_path = os.path.join(output_dir, video_id + '_video_temp.mp4')
+#         temp_audio_path = os.path.join(output_dir, video_id + '_audio_temp.m4a')
+
+#         print('Downloading %s with resolution: %s (best adaptive video)' %
+#               (video_id, video_resolution))
+#         best_video_stream.download(output_path=output_dir,
+#                                    filename=os.path.basename(temp_video_path))
+
+#         if not best_audio_stream:
+#             # 오디오 스트림이 없으면 비디오만 사용한다.
+#             print('No audio stream available for %s, using video only' % (video_id))
+#             os.replace(temp_video_path, video_path)
+#             print('Downloaded: %s (resolution: %s, video only)' %
+#                   (video_id, video_resolution))
+#             return video_path
+
+#         print('Downloading audio for %s' % (video_id))
+#         best_audio_stream.download(output_path=output_dir,
+#                                    filename=os.path.basename(temp_audio_path))
+
+#         # ffmpeg로 비디오+오디오 결합
+#         print('Merging video and audio for %s' % (video_id))
+#         result = subprocess.run(
+#             [
+#                 'ffmpeg',
+#                 '-i', temp_video_path,
+#                 '-i', temp_audio_path,
+#                 '-c', 'copy',
+#                 '-map', '0:v:0',
+#                 '-map', '1:a:0',
+#                 '-y',
+#                 video_path
+#             ],
+#             capture_output=True,
+#             text=True
+#         )
+
+#         # 임시 파일 삭제
+#         if os.path.exists(temp_video_path):
+#             os.remove(temp_video_path)
+#         if os.path.exists(temp_audio_path):
+#             os.remove(temp_audio_path)
+
+#         if result.returncode == 0:
+#             print('Downloaded: %s (resolution: %s)' %
+#                   (video_id, video_resolution))
+#             return video_path
+#         else:
+#             print('Failed to merge video and audio for %s' % (video_id))
+#             print(result.stderr)
+#             return None
+
+#     except Exception as e:
+#         print(e)
+#         print('Failed to download %s' % (video_id))
+#         return None
+
+# ====================================================================================================
+
+import os
+import subprocess
+
 def download_video(output_dir, video_id):
-    # 비디오를 다운로드하는 함수
-    # output_dir: 비디오를 저장할 디렉토리 경로
-    # video_id: YouTube 비디오 ID (예: '--Y9imYnfBw')
-    # 반환값: 다운로드된 비디오 파일 경로, 실패 시 None
-    
-    # 저장될 비디오 파일 경로를 생성한다
-    # 예) output_dir='train/temp_raw_videos', video_id='--Y9imYnfBw'이면
-    #     'train/temp_raw_videos/--Y9imYnfBw.mp4'가 video_path가 된다
-    video_path = os.path.join(output_dir, video_id + '.mp4')
-    
-    # 파일이 이미 존재하면 다운로드하지 않고 경로만 반환한다
-    # os.path.isfile()은 파일이 존재하는지 확인한다
+    """
+    output_dir: 저장할 디렉토리
+    video_id: YouTube video id (예: "--Y9imYnfBw")
+    반환: 성공 시 mp4 파일 경로, 실패 시 None
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    video_path = os.path.join(output_dir, video_id + ".mp4")
+
+    # 이미 존재하면 스킵
     if os.path.isfile(video_path):
-        print('File exists: %s' % (video_id))
+        print(f"File exists: {video_path}")
         return video_path
-    
-    # 파일이 없으면 다운로드를 시도한다
+
+    # yt-dlp를 이용해 최고 화질 mp4 + 오디오 통합본을 받는다.
+    # - f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+    #   -> mp4 비디오+오디오 조합이 되면 그걸, 안 되면 best mp4 하나, 그것도 안 되면 best 전체
+    url = f"https://www.youtube.com/watch?v={video_id}"
+
+    cmd = [
+        "yt-dlp",
+        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "-o", video_path,
+        url,
+    ]
+
+    print("Running:", " ".join(cmd))
+
     try:
-        # YouTube 객체를 생성한다
-        # 'https://www.youtube.com/watch?v=%s' 형식의 URL을 사용한다
-        # 예) video_id='--Y9imYnfBw'이면 'https://www.youtube.com/watch?v=--Y9imYnfBw'
-        yt = YouTube('https://www.youtube.com/watch?v=%s' % (video_id))
-        # 가장 높은 화질의 mp4 스트림을 찾는다
-        # progressive=True는 비디오와 오디오가 함께 있는 스트림을 의미한다
-        # adaptive=True는 적응형 스트림을 포함한다
-        stream = yt.streams.filter(subtype='mp4', progressive=True, adaptive=True).first()
-        # 조건에 맞는 스트림이 없으면 mp4 타입 중 첫 번째를 선택한다
-        if stream is None:
-            stream = yt.streams.filter(subtype='mp4').first()
-        # 비디오를 다운로드한다
-        # output_path는 저장할 디렉토리, filename은 파일명이다
-        stream.download(output_path=output_dir, filename=video_id + '.mp4')
-        print('Downloaded: %s' % (video_id))
-        return video_path
-    except Exception as e:
-        # 다운로드 실패 시 에러 메시지를 출력하고 None을 반환한다
-        print(e)
-        print('Failed to download %s' % (video_id))
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        print("yt-dlp 실행 파일을 찾을 수 없다. yt-dlp를 설치했는지 확인해라.")
         return None
 
+    if result.returncode != 0:
+        print(f"yt-dlp failed for {video_id}")
+        print("stderr:", result.stderr)
+        return None
+
+    if os.path.isfile(video_path):
+        print(f"Downloaded: {video_path}")
+        return video_path
+    else:
+        print(f"yt-dlp reported success but file not found: {video_path}")
+        return None
 
 def split_video(input_file, output_dir):
     # 비디오를 1분 단위로 분할하는 함수
