@@ -19,12 +19,14 @@ parser.add_argument('--clip_info_file', type=str, required=True,
                     help='File containing clip information.')
 parser.add_argument('--output_dir', type=str, required=True,
                     help='Location to dump outputs.')
-parser.add_argument('--num_workers', type=int, default=8,
+parser.add_argument('--num_workers', type=int, default=32,
                     help='How many multiprocessing workers?')
 parser.add_argument('--min_crop_width', type=int, default=256,
                     help='Minimum crop width in pixels. Only videos with crop width >= this value will be processed.')
 parser.add_argument('--min_crop_height', type=int, default=256,
                     help='Minimum crop height in pixels. Only videos with crop height >= this value will be processed.')
+parser.add_argument('--min_duration', type=float, default=0.0,
+                    help='Minimum video duration in seconds. Only videos with duration >= this value will be processed. Default is 0.0 (no minimum).')
 
 
 def get_h_w(filepath):
@@ -52,7 +54,47 @@ def get_fps(filepath):
     return fps
 
 
-def trim_and_crop(input_dir, output_dir, clip_params):
+def get_video_codec(filepath):
+    # 비디오 파일의 코덱 정보를 가져온다
+    # ffmpeg.probe()로 비디오 파일의 메타데이터를 읽어온다
+    probe = ffmpeg.probe(filepath)
+    # 비디오 스트림을 찾는다
+    # codec_type이 'video'인 스트림을 찾아서 video_stream에 저장한다
+    video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
+    # 비디오 코덱 이름을 가져온다
+    # codec_name은 'h264', 'hevc', 'vp9' 등의 코덱 이름을 반환한다
+    # 예) 'h264'는 H.264 코덱을 의미한다
+    codec_name = video_stream.get('codec_name', 'libx264')
+    return codec_name
+
+
+def get_video_bitrate(filepath):
+    # 비디오 파일의 비트레이트를 가져온다
+    # ffmpeg.probe()로 비디오 파일의 메타데이터를 읽어온다
+    probe = ffmpeg.probe(filepath)
+    # 비디오 스트림을 찾는다
+    # codec_type이 'video'인 스트림을 찾아서 video_stream에 저장한다
+    video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
+    # 비디오 비트레이트를 가져온다
+    # bit_rate는 문자열 형식으로 저장되어 있으므로 정수로 변환한다
+    # 비트레이트가 없으면 None을 반환한다
+    # 예) '2423000' → 2423000 (2423 kbps)
+    bitrate = video_stream.get('bit_rate')
+    if bitrate:
+        return int(bitrate)
+    # 비트레이트 정보가 없으면 전체 비트레이트에서 오디오 비트레이트를 빼서 계산한다
+    # format의 bit_rate는 전체 비트레이트이다
+    total_bitrate = probe.get('format', {}).get('bit_rate')
+    if total_bitrate:
+        # 오디오 스트림을 찾는다
+        audio_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'audio'), None)
+        audio_bitrate = int(audio_stream.get('bit_rate', 0)) if audio_stream else 0
+        return int(total_bitrate) - audio_bitrate
+    # 비트레이트 정보가 전혀 없으면 None을 반환한다
+    return None
+
+
+def trim_and_crop(input_dir, output_dir, clip_params, min_duration=0.0):
     # 예시 clip_params: '--Y9imYnfBw_0000, 720, 1280, 0, 271, 504, 63, 792, 351'
     # 각 항목의 의미를 설명하면 아래와 같다:
     #   video_name: '--Y9imYnfBw_0000'
@@ -64,6 +106,7 @@ def trim_and_crop(input_dir, output_dir, clip_params):
     #   T: 63           # crop할 영역의 top 좌표 (픽셀, 원본 기준)
     #   R: 792          # crop할 영역의 right 좌표 (픽셀, 원본 기준)
     #   B: 351          # crop할 영역의 bottom 좌표 (픽셀, 원본 기준)
+    # min_duration: 최소 비디오 길이(초), 이 값 이상인 경우만 처리한다
     
     # clip_params 문자열(콤마로 구분된 값들)을 파싱해서 각각의 변수로 나눈다.
     video_name, H, W, S, E, L, T, R, B = clip_params.strip().split(',')
@@ -100,6 +143,29 @@ def trim_and_crop(input_dir, output_dir, clip_params):
     # 오디오를 동일한 시간 범위로 trim하기 위해 fps가 필요하다
     # 예) fps=30이면 1초에 30프레임이다
     fps = get_fps(input_filepath)
+    # 비디오 길이(초)를 계산한다
+    # duration = (E - S + 1) / fps는 비디오의 지속 시간(초)이다
+    # 예) S=0, E=271, fps=30이면 duration = (271-0+1)/30 = 272/30 = 9.07초
+    # min_duration보다 작으면 처리하지 않고 건너뛴다
+    duration = (E - S + 1) / fps
+    if min_duration > 0.0 and duration < min_duration:
+        # 비디오 길이가 min_duration보다 짧으면 건너뛴다
+        # print()를 사용하여 건너뛴다는 메시지를 출력한다
+        # %s는 문자열 포맷팅으로, video_name 값이 삽입된다
+        # %.2f는 소수점 둘째 자리까지 표시하는 포맷팅이다
+        print('Skipping %s: video duration (%.2f seconds) is shorter than %.2f seconds' % (video_name, duration, min_duration))
+        # 함수를 종료하고 다음 클립으로 넘어간다
+        return
+    # 원본 비디오의 코덱 정보를 가져온다
+    # get_video_codec() 함수는 ffmpeg.probe를 사용하여 비디오 파일의 코덱 이름을 가져온다
+    # 원본과 동일한 코덱을 사용하여 화질 손실을 최소화한다
+    # 예) 'h264', 'hevc', 'vp9' 등의 코덱 이름을 반환한다
+    original_codec = get_video_codec(input_filepath)
+    # 원본 비디오의 비트레이트를 가져온다
+    # get_video_bitrate() 함수는 ffmpeg.probe를 사용하여 비디오 파일의 비트레이트를 가져온다
+    # 원본과 동일한 비트레이트를 사용하여 화질 손실을 최소화한다
+    # 예) 2423000 (2423 kbps)
+    original_bitrate = get_video_bitrate(input_filepath)
 
     # crop 좌표를 실제 프레임에 맞게 보정한다.
     # 예) t = int(63 / 720 * 720) = 63
@@ -157,17 +223,53 @@ def trim_and_crop(input_dir, output_dir, clip_params):
     # ffmpeg.output()은 처리된 스트림을 파일로 출력하도록 설정한다
     # output_filepath에 지정된 경로에 비디오 파일이 저장된다
     # 오디오가 있으면 비디오와 오디오를 모두 포함하고, 없으면 비디오만 포함한다
-    if has_audio:
-        stream = ffmpeg.output(video, audio, output_filepath)
+    # 원본 코덱을 사용하고 원본 비트레이트를 사용하여 화질 손실을 최소화한다
+    # vcodec은 비디오 코덱을 지정한다
+    # 원본 코덱이 'h264'인 경우 'libopenh264'를 사용한다 (libx264는 GPL 라이선스로 인해 사용 불가)
+    # 'hevc' 또는 'h265'인 경우 원본 코덱 그대로 사용한다 (libx265 인코더가 없을 수 있음)
+    # 'av1', 'vp9', 'vp8' 등 느린 코덱은 'libopenh264'로 변환한다 (인코딩 속도 향상, 화질은 원본 비트레이트 유지로 손실 최소화)
+    # 그 외는 원본 코덱 그대로 사용한다
+    if original_codec == 'h264':
+        # libopenh264는 CRF를 지원하지 않으므로 비트레이트를 사용한다
+        output_codec = 'libopenh264'
+    elif original_codec in ['hevc', 'h265']:
+        # HEVC는 libx265가 없을 수 있으므로 원본 코덱 그대로 사용한다
+        # 만약 인코딩이 실패하면 원본 코덱을 사용하는 것이 안전하다
+        output_codec = original_codec
+    elif original_codec in ['av1', 'vp9', 'vp8']:
+        # AV1, VP9, VP8은 인코딩이 매우 느리므로 H.264로 변환한다
+        # libopenh264는 사용 가능한 인코더이므로 이를 사용한다
+        # 원본 비트레이트를 유지하면 화질 손실을 최소화할 수 있다
+        output_codec = 'libopenh264'
     else:
-        stream = ffmpeg.output(video, output_filepath)
+        output_codec = original_codec
+    # ffmpeg.output()에 vcodec과 비트레이트 또는 CRF 파라미터를 추가하여 고화질로 인코딩한다
+    # vcodec=output_codec는 비디오 코덱을 지정한다
+    # 원본 비트레이트가 있으면 비트레이트를 사용하고, 없으면 CRF를 사용한다
+    # libopenh264는 CRF를 지원하지 않으므로 비트레이트를 사용해야 한다
+    # 비트레이트를 사용하면 원본과 동일한 화질을 유지할 수 있다
+    output_kwargs = {'vcodec': output_codec}
+    if original_bitrate:
+        # 비트레이트를 사용하여 원본과 동일한 화질을 유지한다
+        # b=original_bitrate는 비디오 비트레이트를 지정한다
+        output_kwargs['b:v'] = str(original_bitrate)
+    elif output_codec != 'libopenh264':
+        # CRF를 지원하는 코덱인 경우 CRF를 사용한다
+        # crf=18은 거의 무손실에 가까운 화질을 제공한다 (0이 완전 무손실, 23이 기본값, 51이 최저 화질)
+        output_kwargs['crf'] = 18
+    if has_audio:
+        # stream = ffmpeg.output(video, audio, output_filepath)  # 기존 코드: 화질 설정 없음
+        stream = ffmpeg.output(video, audio, output_filepath, **output_kwargs)
+    else:
+        # stream = ffmpeg.output(video, output_filepath)  # 기존 코드: 화질 설정 없음
+        stream = ffmpeg.output(video, output_filepath, **output_kwargs)
     # 실제로 ffmpeg를 실행해 clip을 생성한다.
     # ffmpeg.run()은 설정된 ffmpeg 파이프라인을 실행하여 비디오 처리를 수행한다
     # 비디오가 성공적으로 생성되면 output_filepath에 파일이 저장된다
     ffmpeg.run(stream)
 
 
-def trim_and_crop_min_size(input_dir, output_dir, clip_params, min_crop_width=256, min_crop_height=256):
+def trim_and_crop_min_size(input_dir, output_dir, clip_params, min_crop_width=512, min_crop_height=512, min_duration=0.0):
     # trim_and_crop_min_size: 프레임 크기가 min_crop_width x min_crop_height 이상인 경우만 처리하는 함수
     # 입력 인자는 trim_and_crop과 동일하다
     # input_dir: 입력 비디오가 있는 디렉토리 경로
@@ -175,6 +277,7 @@ def trim_and_crop_min_size(input_dir, output_dir, clip_params, min_crop_width=25
     # clip_params: 비디오 클립 정보가 담긴 문자열 (콤마로 구분)
     # min_crop_width: 최소 crop 너비(픽셀), 이 값 이상인 경우만 처리한다
     # min_crop_height: 최소 crop 높이(픽셀), 이 값 이상인 경우만 처리한다
+    # min_duration: 최소 비디오 길이(초), 이 값 이상인 경우만 처리한다
     
     # 예시 clip_params: '--Y9imYnfBw_0000, 720, 1280, 0, 271, 504, 63, 792, 351'
     # 각 항목의 의미는 trim_and_crop 함수와 동일하다
@@ -244,6 +347,29 @@ def trim_and_crop_min_size(input_dir, output_dir, clip_params, min_crop_width=25
     # 오디오를 동일한 시간 범위로 trim하기 위해 fps가 필요하다
     # 예) fps=30이면 1초에 30프레임이다
     fps = get_fps(input_filepath)
+    # 비디오 길이(초)를 계산한다
+    # duration = (E - S + 1) / fps는 비디오의 지속 시간(초)이다
+    # 예) S=0, E=271, fps=30이면 duration = (271-0+1)/30 = 272/30 = 9.07초
+    # min_duration보다 작으면 처리하지 않고 건너뛴다
+    duration = (E - S + 1) / fps
+    if min_duration > 0.0 and duration < min_duration:
+        # 비디오 길이가 min_duration보다 짧으면 건너뛴다
+        # print()를 사용하여 건너뛴다는 메시지를 출력한다
+        # %s는 문자열 포맷팅으로, video_name 값이 삽입된다
+        # %.2f는 소수점 둘째 자리까지 표시하는 포맷팅이다
+        print('Skipping %s: video duration (%.2f seconds) is shorter than %.2f seconds' % (video_name, duration, min_duration))
+        # 함수를 종료하고 다음 클립으로 넘어간다
+        return
+    # 원본 비디오의 코덱 정보를 가져온다
+    # get_video_codec() 함수는 ffmpeg.probe를 사용하여 비디오 파일의 코덱 이름을 가져온다
+    # 원본과 동일한 코덱을 사용하여 화질 손실을 최소화한다
+    # 예) 'h264', 'hevc', 'vp9' 등의 코덱 이름을 반환한다
+    original_codec = get_video_codec(input_filepath)
+    # 원본 비디오의 비트레이트를 가져온다
+    # get_video_bitrate() 함수는 ffmpeg.probe를 사용하여 비디오 파일의 비트레이트를 가져온다
+    # 원본과 동일한 비트레이트를 사용하여 화질 손실을 최소화한다
+    # 예) 2423000 (2423 kbps)
+    original_bitrate = get_video_bitrate(input_filepath)
 
     # crop 좌표를 실제 프레임에 맞게 보정한다
     # 원본 영상 크기(H, W)와 실제 영상 크기(h, w)가 다를 수 있으므로 비례 계산을 수행한다
@@ -321,10 +447,46 @@ def trim_and_crop_min_size(input_dir, output_dir, clip_params, min_crop_width=25
         # ffmpeg.output()은 처리된 스트림을 파일로 출력하도록 설정한다
         # output_filepath에 지정된 경로에 비디오 파일이 저장된다
         # 오디오가 있으면 비디오와 오디오를 모두 포함하고, 없으면 비디오만 포함한다
-        if has_audio:
-            stream = ffmpeg.output(video, audio, output_filepath)
+        # 원본 코덱을 사용하고 원본 비트레이트를 사용하여 화질 손실을 최소화한다
+        # vcodec은 비디오 코덱을 지정한다
+        # 원본 코덱이 'h264'인 경우 'libopenh264'를 사용한다 (libx264는 GPL 라이선스로 인해 사용 불가)
+        # 'hevc' 또는 'h265'인 경우 원본 코덱 그대로 사용한다 (libx265 인코더가 없을 수 있음)
+        # 'av1', 'vp9', 'vp8' 등 느린 코덱은 'libopenh264'로 변환한다 (인코딩 속도 향상, 화질은 원본 비트레이트 유지로 손실 최소화)
+        # 그 외는 원본 코덱 그대로 사용한다
+        if original_codec == 'h264':
+            # libopenh264는 CRF를 지원하지 않으므로 비트레이트를 사용한다
+            output_codec = 'libopenh264'
+        elif original_codec in ['hevc', 'h265']:
+            # HEVC는 libx265가 없을 수 있으므로 원본 코덱 그대로 사용한다
+            # 만약 인코딩이 실패하면 원본 코덱을 사용하는 것이 안전하다
+            output_codec = original_codec
+        elif original_codec in ['av1', 'vp9', 'vp8']:
+            # AV1, VP9, VP8은 인코딩이 매우 느리므로 H.264로 변환한다
+            # libopenh264는 사용 가능한 인코더이므로 이를 사용한다
+            # 원본 비트레이트를 유지하면 화질 손실을 최소화할 수 있다
+            output_codec = 'libopenh264'
         else:
-            stream = ffmpeg.output(video, output_filepath)
+            output_codec = original_codec
+        # ffmpeg.output()에 vcodec과 비트레이트 또는 CRF 파라미터를 추가하여 고화질로 인코딩한다
+        # vcodec=output_codec는 비디오 코덱을 지정한다
+        # 원본 비트레이트가 있으면 비트레이트를 사용하고, 없으면 CRF를 사용한다
+        # libopenh264는 CRF를 지원하지 않으므로 비트레이트를 사용해야 한다
+        # 비트레이트를 사용하면 원본과 동일한 화질을 유지할 수 있다
+        output_kwargs = {'vcodec': output_codec}
+        if original_bitrate:
+            # 비트레이트를 사용하여 원본과 동일한 화질을 유지한다
+            # b=original_bitrate는 비디오 비트레이트를 지정한다
+            output_kwargs['b:v'] = str(original_bitrate)
+        elif output_codec != 'libopenh264':
+            # CRF를 지원하는 코덱인 경우 CRF를 사용한다
+            # crf=18은 거의 무손실에 가까운 화질을 제공한다 (0이 완전 무손실, 23이 기본값, 51이 최저 화질)
+            output_kwargs['crf'] = 18
+        if has_audio:
+            # stream = ffmpeg.output(video, audio, output_filepath)  # 기존 코드: 화질 설정 없음
+            stream = ffmpeg.output(video, audio, output_filepath, **output_kwargs)
+        else:
+            # stream = ffmpeg.output(video, output_filepath)  # 기존 코드: 화질 설정 없음
+            stream = ffmpeg.output(video, output_filepath, **output_kwargs)
         # 실제로 ffmpeg를 실행해 clip을 생성한다
         # ffmpeg.run()은 설정된 ffmpeg 파이프라인을 실행하여 비디오 처리를 수행한다
         # 비디오가 성공적으로 생성되면 output_filepath에 파일이 저장된다
@@ -375,12 +537,13 @@ if __name__ == '__main__':
     # Download videos.
     # trim_and_crop_min_size 함수를 사용하여 downloader를 생성한다
     # partial()은 함수의 일부 인자를 고정하여 새로운 함수를 만드는 함수이다
-    # trim_and_crop_min_size 함수의 첫 번째, 두 번째, 네 번째, 다섯 번째 인자(input_dir, output_dir, min_crop_width, min_crop_height)를 고정하고
+    # trim_and_crop_min_size 함수의 첫 번째, 두 번째, 네 번째, 다섯 번째, 여섯 번째 인자(input_dir, output_dir, min_crop_width, min_crop_height, min_duration)를 고정하고
     # 세 번째 인자(clip_params)만 받는 새로운 함수를 만든다
     # 이렇게 하면 multiprocessing에서 각 클립 정보만 전달하면 된다
     # trim_and_crop_min_size는 실제 비디오 파일 크기를 확인한 후 min_crop_width x min_crop_height 이상인 경우만 처리한다
     # 실제 파일 크기가 다를 수 있으므로(리사이즈 등), 함수 내에서 실제 크기를 확인하는 것이 더 정확하다
-    downloader = partial(trim_and_crop_min_size, args.input_dir, args.output_dir, min_crop_width=args.min_crop_width, min_crop_height=args.min_crop_height)
+    # 또한 비디오 길이가 min_duration 이상인 경우만 처리한다
+    downloader = partial(trim_and_crop_min_size, args.input_dir, args.output_dir, min_crop_width=args.min_crop_width, min_crop_height=args.min_crop_height, min_duration=args.min_duration)
 
     # 시작 시간을 기록한다
     # timer()는 현재 시간을 초 단위로 반환한다
