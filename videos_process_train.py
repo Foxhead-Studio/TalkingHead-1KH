@@ -2,10 +2,26 @@
 #
 # This script is licensed under the MIT License.
 
+'''
+python videos_process_train.py \
+    --video_ids_file data_list/train_video_ids_340x340_12s.txt \
+    --tubes_file data_list/train_video_tubes_340x340_12s.txt \
+    --output_dir train/cropped_clips \
+    --temp_raw_dir train/temp_raw_videos \
+    --temp_split_dir train/temp_1min_clips \
+    --delete_temp on \
+    --min_crop_width 512 \
+    --min_crop_height 512 \
+    --min_duration 12 \
+    --num_workers 32 \
+    --download_delay 2.0
+'''
+
 import argparse
 import glob
 import os
 import subprocess
+import time
 from functools import partial
 from time import time as timer
 
@@ -33,6 +49,12 @@ parser.add_argument('--min_crop_width', type=int, default=256,
                     help='Minimum crop width in pixels. Only videos with crop width >= this value will be processed.')
 parser.add_argument('--min_crop_height', type=int, default=256,
                     help='Minimum crop height in pixels. Only videos with crop height >= this value will be processed.')
+parser.add_argument('--min_duration', type=float, default=0.0,
+                    help='Minimum video duration in seconds. Only videos with duration >= this value will be processed. Default is 0.0 (no minimum).')
+parser.add_argument('--download_delay', type=float, default=2.0,
+                    help='Delay in seconds between video download requests. This helps avoid being blocked by YouTube. Default is 2.0 seconds.')
+parser.add_argument('--resume_from', type=str, default=None,
+                    help='Resume processing from a specific video ID. All videos before this ID will be skipped. Example: --resume_from "-qsTrNdfd1w"')
 parser.add_argument('--num_workers', type=int, default=8,
                     help='How many multiprocessing workers for cropping?')
 args = parser.parse_args()
@@ -354,10 +376,11 @@ args = parser.parse_args()
 import os
 import subprocess
 
-def download_video(output_dir, video_id):
+def download_video(output_dir, video_id, delay=2.0):
     """
     output_dir: 저장할 디렉토리
     video_id: YouTube video id (예: "--Y9imYnfBw")
+    delay: 다운로드 전 대기 시간(초), YouTube 봇 차단을 피하기 위해 사용한다
     반환: 성공 시 mp4 파일 경로, 실패 시 None
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -369,6 +392,13 @@ def download_video(output_dir, video_id):
         print(f"File exists: {video_path}")
         return video_path
 
+    # 다운로드 전 딜레이를 추가한다
+    # YouTube가 봇으로 인식하지 않도록 요청 간 간격을 둔다
+    # delay가 0보다 크면 해당 시간만큼 대기한다
+    # 예) delay=2.0이면 2초 대기한다
+    if delay > 0:
+        time.sleep(delay)
+
     # yt-dlp를 이용해 최고 화질 mp4 + 오디오 통합본을 받는다.
     # - f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
     #   -> mp4 비디오+오디오 조합이 되면 그걸, 안 되면 best mp4 하나, 그것도 안 되면 best 전체
@@ -378,6 +408,7 @@ def download_video(output_dir, video_id):
         "yt-dlp",
         "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "-o", video_path,
+        "--cookies", "./www.youtube.com_cookies.txt",
         url,
     ]
 
@@ -565,6 +596,27 @@ if __name__ == '__main__':
             if video_id:
                 video_ids.append(video_id)
     
+    # resume_from이 지정되어 있으면 해당 비디오 ID부터 재개한다
+    # resume_from은 중단된 지점부터 재개하기 위해 사용한다
+    # 예) --resume_from "-qsTrNdfd1w"이면 "-qsTrNdfd1w" 이후의 비디오만 처리한다
+    # 빈 문자열도 None으로 처리한다
+    if args.resume_from and args.resume_from.strip():
+        # resume_from ID의 앞뒤 공백을 제거한다
+        # strip()은 앞뒤 공백을 제거한다
+        resume_id = args.resume_from.strip()
+        # video_ids 리스트에서 resume_from ID를 찾는다
+        # index() 메서드는 리스트에서 특정 값의 인덱스를 반환한다
+        # ValueError가 발생하면 해당 ID가 리스트에 없다는 의미이다
+        try:
+            resume_index = video_ids.index(resume_id)
+            # resume_from ID 이후의 비디오만 처리하도록 리스트를 슬라이스한다
+            # [resume_index:]는 resume_index부터 끝까지의 요소를 가져온다
+            video_ids = video_ids[resume_index:]
+            print('Resuming from video ID: %s (skipping %d videos)' % (resume_id, resume_index))
+        except ValueError:
+            # resume_from ID가 리스트에 없으면 경고 메시지를 출력하고 처음부터 시작한다
+            print('Warning: Resume video ID "%s" not found in video_ids_file. Starting from the beginning.' % (resume_id))
+    
     # 출력 디렉토리와 임시 디렉토리들을 생성한다
     # os.makedirs()는 디렉토리를 생성한다
     # exist_ok=True는 디렉토리가 이미 존재해도 오류를 발생시키지 않는다
@@ -588,7 +640,8 @@ if __name__ == '__main__':
         # 1. 비디오 다운로드
         # download_video() 함수를 호출하여 비디오를 다운로드한다
         # temp_raw_dir에 원본 비디오가 저장된다
-        video_path = download_video(args.temp_raw_dir, video_id)
+        # delay 파라미터를 전달하여 YouTube 봇 차단을 피한다
+        video_path = download_video(args.temp_raw_dir, video_id, delay=args.download_delay)
         
         # 다운로드가 실패하면 다음 비디오로 넘어간다
         # video_path가 None이면 다운로드 실패를 의미한다
@@ -626,11 +679,12 @@ if __name__ == '__main__':
         # 4. 크롭 작업을 수행한다
         # trim_and_crop_min_size 함수를 사용하여 크롭 작업을 수행한다
         # partial()은 함수의 일부 인자를 고정하여 새로운 함수를 만드는 함수이다
-        # trim_and_crop_min_size 함수의 첫 번째, 두 번째, 네 번째, 다섯 번째 인자(input_dir, output_dir, min_crop_width, min_crop_height)를 고정하고
+        # trim_and_crop_min_size 함수의 첫 번째, 두 번째, 네 번째, 다섯 번째, 여섯 번째 인자(input_dir, output_dir, min_crop_width, min_crop_height, min_duration)를 고정하고
         # 세 번째 인자(clip_params)만 받는 새로운 함수를 만든다
         # 이렇게 하면 multiprocessing에서 각 tube 정보만 전달하면 된다
+        # 또한 비디오 길이가 min_duration 이상인 경우만 처리한다
         cropper = partial(trim_and_crop_min_size, args.temp_split_dir, args.output_dir, 
-                         min_crop_width=args.min_crop_width, min_crop_height=args.min_crop_height)
+                         min_crop_width=args.min_crop_width, min_crop_height=args.min_crop_height, min_duration=args.min_duration)
         
         # 멀티프로세싱을 사용하여 크롭 작업을 수행한다
         # mp.Pool()은 프로세스 풀을 생성한다
