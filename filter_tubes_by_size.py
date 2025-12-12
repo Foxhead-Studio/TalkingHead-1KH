@@ -1,3 +1,14 @@
+'''
+python filter_tubes_by_size.py \
+    --input_file data_list/train_video_tubes.txt \
+    --output_file data_list/train_video_tubes_340x340_12s.txt \
+    --video_ids_output_file data_list/train_video_ids_340x340_12s.txt \
+    --min_width 340 \
+    --min_height 340 \
+    --min_duration 12.0 \
+    --fps 30.0
+'''
+
 import argparse
 import os
 
@@ -8,19 +19,25 @@ parser.add_argument('--output_file', type=str, required=True,
                     help='Output filtered tubes file.')
 parser.add_argument('--video_ids_output_file', type=str, default=None,
                     help='Output file for video IDs (e.g., train_video_ids_512x512.txt). If not specified, will be auto-generated.')
-parser.add_argument('--min_width', type=int, default=512,
-                    help='Minimum crop width in pixels. Default: 512')
-parser.add_argument('--min_height', type=int, default=512,
-                    help='Minimum crop height in pixels. Default: 512')
+parser.add_argument('--min_width', type=int, default=340,
+                    help='Minimum crop width in pixels. Default: 340')
+parser.add_argument('--min_height', type=int, default=340,
+                    help='Minimum crop height in pixels. Default: 340')
+parser.add_argument('--min_duration', type=float, default=12.0,
+                    help='Minimum video duration in seconds. Only videos with duration >= this value will be processed. Default: 12.0 seconds')
+parser.add_argument('--fps', type=float, default=30.0,
+                    help='Frames per second (fps) for calculating video duration. Default: 30.0 fps')
 args = parser.parse_args()
 
 
-def filter_tubes_by_size(input_file, output_file, min_width=512, min_height=512, video_ids_output_file=None):
-    # train_video_tubes.txt 파일에서 크롭 크기가 min_width x min_height 이상인 줄만 필터링하는 함수
+def filter_tubes_by_size(input_file, output_file, min_width=340, min_height=340, min_duration=12.0, fps=30.0, video_ids_output_file=None):
+    # train_video_tubes.txt 파일에서 크롭 크기가 min_width x min_height 이상이고, 동영상 길이가 min_duration 이상인 줄만 필터링하는 함수
     # input_file: 입력 tube 정보 파일 경로
     # output_file: 필터링된 결과를 저장할 파일 경로
     # min_width: 최소 크롭 너비(픽셀)
     # min_height: 최소 크롭 높이(픽셀)
+    # min_duration: 최소 동영상 길이(초)
+    # fps: 초당 프레임 수, 동영상 길이 계산에 사용된다
     # video_ids_output_file: 비디오 ID를 저장할 파일 경로 (None이면 저장하지 않음)
     # 반환값: (필터링된 줄의 개수, 추출된 비디오 ID 개수)
     
@@ -78,13 +95,21 @@ def filter_tubes_by_size(input_file, output_file, min_width=512, min_height=512,
                 # 예) B=351, T=63이면 crop_height = 351 - 63 = 288
                 crop_height = B - T
                 
-                # 크롭 크기가 min_width x min_height 이상인지 확인한다
+                # 동영상 길이(초)를 계산한다
+                # duration = (E - S + 1) / fps는 동영상의 지속 시간(초)이다
+                # 예) S=0, E=271, fps=30이면 duration = (271-0+1)/30 = 272/30 = 9.07초
+                # E는 끝 프레임 번호, S는 시작 프레임 번호이므로 (E - S + 1)은 총 프레임 수이다
+                duration = (E - S + 1) / fps
+                
+                # 크롭 크기가 min_width x min_height 이상이고, 동영상 길이가 min_duration 이상인지 확인한다
                 # crop_width >= min_width는 가로 너비가 min_width픽셀 이상인지 확인한다
                 # crop_height >= min_height는 세로 높이가 min_height픽셀 이상인지 확인한다
-                # 두 조건을 모두 만족해야만 필터링된 리스트에 추가한다 (and 연산자 사용)
-                # 예) crop_width=288, crop_height=288, min_width=512, min_height=512이면 288 >= 512는 False이므로 건너뛴다
-                #     crop_width=600, crop_height=600, min_width=512, min_height=512이면 600 >= 512는 True이므로 추가한다
-                if crop_width >= min_width and crop_height >= min_height:
+                # duration >= min_duration는 동영상 길이가 min_duration초 이상인지 확인한다
+                # 세 조건을 모두 만족해야만 필터링된 리스트에 추가한다 (and 연산자 사용)
+                # 예) crop_width=288, crop_height=288, min_width=340, min_height=340이면 288 >= 340는 False이므로 건너뛴다
+                #     crop_width=400, crop_height=400, min_width=340, min_height=340, duration=9.07, min_duration=12.0이면 duration >= min_duration는 False이므로 건너뛴다
+                #     crop_width=400, crop_height=400, min_width=340, min_height=340, duration=15.0, min_duration=12.0이면 모든 조건을 만족하므로 추가한다
+                if crop_width >= min_width and crop_height >= min_height and duration >= min_duration:
                     # 조건을 만족하면 필터링된 리스트에 추가한다
                     # 원본 줄을 그대로 추가한다 (공백 포함)
                     filtered_lines.append(line)
@@ -180,19 +205,19 @@ if __name__ == '__main__':
         video_ids_output_file = args.video_ids_output_file
     
     # 필터링 작업을 수행한다
-    # filter_tubes_by_size() 함수를 호출하여 크롭 크기가 min_width x min_height 이상인 줄만 필터링한다
+    # filter_tubes_by_size() 함수를 호출하여 크롭 크기가 min_width x min_height 이상이고, 동영상 길이가 min_duration 이상인 줄만 필터링한다
     # 반환값은 (필터링된 줄의 개수, 추출된 비디오 ID 개수) 튜플이다
     filtered_count, video_ids_count = filter_tubes_by_size(
         args.input_file, args.output_file, 
         min_width=args.min_width, min_height=args.min_height,
+        min_duration=args.min_duration, fps=args.fps,
         video_ids_output_file=video_ids_output_file
     )
     
     # 결과를 출력한다
     # 필터링된 줄의 개수를 출력한다
-    print('Filtered %d tubes with size >= %dx%d' % (filtered_count, args.min_width, args.min_height))
+    print('Filtered %d tubes with size >= %dx%d and duration >= %.2f seconds (fps=%.1f)' % (filtered_count, args.min_width, args.min_height, args.min_duration, args.fps))
     print('Output saved to: %s' % (args.output_file))
     # 추출된 비디오 ID 개수를 출력한다
     print('Extracted %d unique video IDs' % (video_ids_count))
     print('Video IDs saved to: %s' % (video_ids_output_file))
-
